@@ -291,6 +291,8 @@ macro(set_clientlib_target_properties GNS_TARGET)
 		#endif()
 	elseif(CMAKE_SYSTEM_NAME MATCHES FreeBSD)
 
+	elseif(CMAKE_SYSTEM_NAME MATCHES "Android")
+		# Android NDK (Bionic): no Win32-style system libs to link here.
 	elseif(CMAKE_SYSTEM_NAME MATCHES Windows)
 		if(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
 			get_target_property(TARGET_TYPE ${GNS_TARGET} TYPE)
