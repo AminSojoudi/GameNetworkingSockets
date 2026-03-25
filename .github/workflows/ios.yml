@@ -30,17 +30,8 @@ jobs:
 
       - uses: lukka/get-cmake@latest
 
-      - name: Verify CI scripts (ensure scripts/ci is committed and pushed)
-        run: |
-          f="${{ github.workspace }}/scripts/ci/build-ios.sh"
-          if [[ ! -f "$f" ]]; then
-            echo "::error::Missing $f — add the scripts/ci directory to this branch and push."
-            ls -la "${{ github.workspace }}/scripts" 2>/dev/null || echo "(no scripts/ directory)"
-            exit 127
-          fi
-
       - name: Build and install
-        run: bash "${{ github.workspace }}/scripts/ci/build-ios.sh" --triplet ${{ matrix.triplet }}
+        run: bash "${{ github.workspace }}/scripts/ci/ci-build-ios.sh" --triplet ${{ matrix.triplet }}
 
       - name: Upload install tree
         uses: actions/upload-artifact@v4

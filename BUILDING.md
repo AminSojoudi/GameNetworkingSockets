@@ -85,11 +85,11 @@ prefix. These are what **`.github/workflows/release.yml`**, **`android.yml`**, a
 | Script | Host OS | Target |
 |--------|---------|--------|
 | [`scripts/ci/bootstrap-vcpkg.sh`](scripts/ci/bootstrap-vcpkg.sh) | Linux, macOS | Clone/checkout and bootstrap vcpkg only |
-| [`scripts/ci/build-linux-x64.sh`](scripts/ci/build-linux-x64.sh) | Linux | `x64-linux` |
-| [`scripts/ci/build-macos-arm64.sh`](scripts/ci/build-macos-arm64.sh) | macOS (Apple Silicon typical) | `arm64-osx` |
-| [`scripts/ci/build-android.sh`](scripts/ci/build-android.sh) | Linux, macOS | Android (see below) |
-| [`scripts/ci/build-ios.sh`](scripts/ci/build-ios.sh) | macOS + Xcode | iOS device or simulator (see below) |
-| [`scripts/ci/build-windows-x64.ps1`](scripts/ci/build-windows-x64.ps1) | Windows | `x64-windows`, OpenSSL, MSVC + Ninja |
+| [`scripts/ci/ci-build-linux-x64.sh`](scripts/ci/ci-build-linux-x64.sh) | Linux | `x64-linux` |
+| [`scripts/ci/ci-build-macos-arm64.sh`](scripts/ci/ci-build-macos-arm64.sh) | macOS (Apple Silicon typical) | `arm64-osx` |
+| [`scripts/ci/ci-build-android.sh`](scripts/ci/ci-build-android.sh) | Linux, macOS | Android (see below) |
+| [`scripts/ci/ci-build-ios.sh`](scripts/ci/ci-build-ios.sh) | macOS + Xcode | iOS device or simulator (see below) |
+| [`scripts/ci/ci-build-windows-x64.ps1`](scripts/ci/ci-build-windows-x64.ps1) | Windows | `x64-windows`, OpenSSL, MSVC + Ninja |
 | [`scripts/ci/package-install-tree.sh`](scripts/ci/package-install-tree.sh) | Any | Pack an existing install prefix (`--prefix`, `--name`, `--format tgz\|zip`) |
 | [`scripts/ci/flatten-release-assets.sh`](scripts/ci/flatten-release-assets.sh) | Any | Used by the release workflow to collect artifacts |
 
@@ -97,16 +97,16 @@ prefix. These are what **`.github/workflows/release.yml`**, **`android.yml`**, a
 
 ```bash
 cd /path/to/GameNetworkingSockets
-bash scripts/ci/build-linux-x64.sh
+bash scripts/ci/ci-build-linux-x64.sh
 # Optional tarball in the current directory:
-PACKAGE_NAME=GameNetworkingSockets-local-linux-x64 bash scripts/ci/build-linux-x64.sh
+PACKAGE_NAME=GameNetworkingSockets-local-linux-x64 bash scripts/ci/ci-build-linux-x64.sh
 ```
 
 **macOS (desktop library)** — Xcode Command Line Tools and Ninja:
 
 ```bash
 cd /path/to/GameNetworkingSockets
-bash scripts/ci/build-macos-arm64.sh
+bash scripts/ci/ci-build-macos-arm64.sh
 ```
 
 **Windows** — run from **x64 Native Tools Command Prompt for VS**, **Developer PowerShell for VS**, or any shell after MSVC env vars are set (as on GitHub Actions):
@@ -114,7 +114,7 @@ bash scripts/ci/build-macos-arm64.sh
 ```powershell
 cd C:\path\to\GameNetworkingSockets
 $env:PACKAGE_NAME = "GameNetworkingSockets-local-windows-x64"   # optional
-pwsh scripts/ci/build-windows-x64.ps1
+pwsh scripts/ci/ci-build-windows-x64.ps1
 ```
 
 ### Android (vcpkg + NDK)
@@ -125,9 +125,9 @@ must contain `build/cmake/android.toolchain.cmake`), CMake, Ninja, `pkg-config`.
 ```bash
 export ANDROID_NDK_HOME=/path/to/ndk
 cd /path/to/GameNetworkingSockets
-bash scripts/ci/build-android.sh --triplet arm64-android --abi arm64-v8a
+bash scripts/ci/ci-build-android.sh --triplet arm64-android --abi arm64-v8a
 # armeabi-v7a:
-# bash scripts/ci/build-android.sh --triplet arm-neon-android --abi armeabi-v7a
+# bash scripts/ci/ci-build-android.sh --triplet arm-neon-android --abi armeabi-v7a
 ```
 
 `--no-install` configures and builds only (used by **`.github/workflows/android.yml`**
@@ -144,11 +144,11 @@ supply dependencies. The script forces **static** GNS (`BUILD_SHARED_LIB=OFF`,
 
 ```bash
 cd /path/to/GameNetworkingSockets
-bash scripts/ci/build-ios.sh --triplet arm64-ios
+bash scripts/ci/ci-build-ios.sh --triplet arm64-ios
 # Apple Silicon simulator:
-# bash scripts/ci/build-ios.sh --triplet arm64-ios-simulator
+# bash scripts/ci/ci-build-ios.sh --triplet arm64-ios-simulator
 # Intel simulator (when building from an Intel Mac or cross-compiling):
-# bash scripts/ci/build-ios.sh --triplet x64-ios
+# bash scripts/ci/ci-build-ios.sh --triplet x64-ios
 ```
 
 Optional: `IOS_DEPLOYMENT_TARGET` or `--deployment-target` (default `13.0`).
@@ -166,6 +166,25 @@ Tagged release file names look like `GameNetworkingSockets-<tag>-<platform>.tar.
 Change `VCPKG_COMMIT` in **`scripts/ci/common.sh`** and the `VCPKG_COMMIT` env in
 **`.github/workflows/android.yml`**, **`ios.yml`**, and **`release.yml`** together
 so local builds and Actions stay aligned.
+
+### CI scripts vs `.gitignore` (`**/build-*`)
+
+The repo’s **`.gitignore`** includes **`**/build-*`** so local CMake output trees
+like `build-android-arm64` stay untracked. That pattern would also match script
+names such as `build-android.sh`, so the drivers are named **`ci-build-*.sh`**
+and **`ci-build-windows-x64.ps1`** instead.
+
+If **`bash: …/scripts/ci/ci-build-*.sh: No such file or directory`** appears in
+Actions, the clone does not contain those files — commit and push them:
+
+```bash
+git add scripts/ci/ci-build-*.sh scripts/ci/ci-build-windows-x64.ps1
+git status
+git commit -m "Add CI build scripts"
+git push
+```
+
+Also ensure **`.gitattributes`** keeps `*.sh` as **LF** (`git add --renormalize scripts/ci` on Windows if needed).
 
 ## Windows / Visual Studio
 
