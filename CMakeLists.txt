@@ -161,6 +161,8 @@ function(set_target_common_gns_properties TGT)
 		target_compile_definitions(${TGT} PUBLIC LINUX)
 	elseif(CMAKE_SYSTEM_NAME MATCHES Darwin)
 		target_compile_definitions(${TGT} PUBLIC OSX)
+	elseif(CMAKE_SYSTEM_NAME MATCHES "Android")
+		# __ANDROID__ comes from the NDK; do not define LINUX (Bionic LP64 / types differ from glibc Linux).
 	elseif(CMAKE_SYSTEM_NAME MATCHES FreeBSD)
 		target_compile_definitions(${TGT} PUBLIC FREEBSD)
 	elseif(CMAKE_SYSTEM_NAME MATCHES Windows)

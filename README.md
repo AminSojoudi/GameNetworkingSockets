@@ -70,7 +70,7 @@ To get an idea of what the API is like, here are a few things to check out:
 
 ## Building
 
-See [BUILDING](BUILDING.md) for more information.
+See [BUILDING.md](BUILDING.md) for Linux, Windows, macOS, **Android**, **iOS**, vcpkg, and the **`scripts/ci/`** helpers used by GitHub Actions (local release-style builds and packaging).
 
 ## Language bindings
 

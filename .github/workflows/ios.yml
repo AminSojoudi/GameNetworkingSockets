@@ -1,0 +1,40 @@
+# iOS device + simulator static libraries (vcpkg triplets). macOS + Xcode only.
+name: iOS
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ios-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+  VCPKG_COMMIT: fba75d09065fcc76a25dcf386b1d00d33f5175af
+
+jobs:
+  build-ios:
+    name: iOS ${{ matrix.triplet }}
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        triplet:
+          - arm64-ios
+          - arm64-ios-simulator
+          - x64-ios
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: lukka/get-cmake@latest
+
+      - name: Build and install
+        run: bash scripts/ci/build-ios.sh --triplet ${{ matrix.triplet }}
+
+      - name: Upload install tree
+        uses: actions/upload-artifact@v4
+        with:
+          name: gns-ios-${{ matrix.triplet }}
+          path: install-ios-${{ matrix.triplet }}
