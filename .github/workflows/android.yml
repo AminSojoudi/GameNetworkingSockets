@@ -13,7 +13,7 @@ concurrency:
 
 env:
   VCPKG_ROOT: ${{ github.workspace }}/vcpkg
-  VCPKG_COMMIT: fba75d09065fcc76a25dcf386b1d00d33f5175af
+  VCPKG_COMMIT: 522253caf47268c1724f486a035e927a42a90092
 
 jobs:
   build-android:

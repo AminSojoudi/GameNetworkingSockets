@@ -5,7 +5,7 @@ _GNS_CI_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GNS_REPO_ROOT="$(cd "${_GNS_CI_LIB_DIR}/../.." && pwd)"
 
 : "${VCPKG_ROOT:=${GNS_REPO_ROOT}/vcpkg}"
-: "${VCPKG_COMMIT:=fba75d09065fcc76a25dcf386b1d00d33f5175af}"
+: "${VCPKG_COMMIT:=522253caf47268c1724f486a035e927a42a90092}"
 
 bootstrap_vcpkg() {
   if [[ ! -d "${VCPKG_ROOT}/.git" ]]; then

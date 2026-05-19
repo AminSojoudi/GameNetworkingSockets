@@ -13,7 +13,7 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot = (Resolve-Path (Join-Path $ScriptDir "..\..")).Path
 
 if (-not $env:VCPKG_ROOT) { $env:VCPKG_ROOT = Join-Path $RepoRoot "vcpkg" }
-if (-not $env:VCPKG_COMMIT) { $env:VCPKG_COMMIT = "fba75d09065fcc76a25dcf386b1d00d33f5175af" }
+if (-not $env:VCPKG_COMMIT) { $env:VCPKG_COMMIT = "522253caf47268c1724f486a035e927a42a90092" }
 
 if (-not (Test-Path (Join-Path $env:VCPKG_ROOT ".git"))) {
     git clone https://github.com/microsoft/vcpkg.git $env:VCPKG_ROOT
