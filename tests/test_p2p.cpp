@@ -12,6 +12,9 @@
 #include <steam/steamnetworkingsockets.h>
 #include <steam/isteamnetworkingutils.h>
 #include "../examples/trivial_signaling_client.h"
+#include "../src/steamnetworkingsockets/clientlib/steamnetworkingsockets_mock.h"
+
+#define DEFAULT_STUN_SERVER "stun.l.google.com:19302"
 
 HSteamListenSocket g_hListenSock;
 HSteamNetConnection g_hConnection;
@@ -26,6 +29,54 @@ ETestRole g_eTestRole = k_ETestRole_Undefined;
 
 int g_nVirtualPortLocal = 0; // Used when listening, and when connecting
 int g_nVirtualPortRemote = 0; // Only used when connecting
+ESteamNetworkingSocketsDebugOutputType g_eTestP2PRendezvousLogLevel = k_ESteamNetworkingSocketsDebugOutputType_Verbose;
+
+void PrintUsage()
+{
+	fprintf( stderr,
+		"Usage: test_p2p [options]\n"
+		"\n"
+		"  --identity-local <identity>        Local identity string\n"
+		"  --identity-remote <identity>        Remote identity string (not needed for --server)\n"
+		"  --signaling-server <host:port>      Trivial signaling server (default: localhost:10000)\n"
+		"  --server                            Act as server (listen for connection)\n"
+		"  --client                            Act as client (connect to server)\n"
+		"  --symmetric                         Symmetric connect mode\n"
+		"  --log <file>                        Write log to file\n"
+		"  --spewlevel <level>                 Console spew level: msg, verbose, debug\n"
+		"  --loglevel-p2prendezvous <level>    P2P rendezvous log level: msg, verbose, debug\n"
+		"  --stun-server <host:port>           STUN server address (default: " DEFAULT_STUN_SERVER ")\n"
+		"  --ice-implementation <n>            ICE implementation: 0=default, 1=native\n"
+#ifdef STEAMNETWORKINGSOCKETS_ENABLE_MOCK
+		"\n"
+		"Mock network options:\n"
+		"  --mock-adapter <ip>                 Add a mock network adapter (repeatable).\n"
+		"                                        Assigned to the most recently declared gateway,\n"
+		"                                        or public (no NAT) if no gateway declared yet.\n"
+		"  --mock-latency <ms>                 One-way send latency for the last --mock-adapter.\n"
+		"  --mock-disabled                     Mark the last --mock-adapter as down.\n"
+		"  --mock-gateway <ip>                 Declare a NAT gateway with this public IP.\n"
+		"                                        Subsequent --mock-adapters are assigned to it.\n"
+		"  --mock-nat <type>                   NAT type for last gateway: full-cone (default),\n"
+		"                                        restricted-cone, port-restricted-cone, symmetric\n"
+		"  --mock-internal-latency <ms>        VPN-tunnel latency for last gateway (host->exit).\n"
+		"  --mock-external-latency <ms>        WAN latency for last gateway (exit->internet).\n"
+#endif
+	);
+}
+
+static ESteamNetworkingSocketsDebugOutputType ParseLogLevelValue( const char *pszArg, const char *pszSwitchName )
+{
+	if ( !strcmp( pszArg, "msg" ) )
+		return k_ESteamNetworkingSocketsDebugOutputType_Msg;
+	if ( !strcmp( pszArg, "verbose" ) )
+		return k_ESteamNetworkingSocketsDebugOutputType_Verbose;
+	if ( !strcmp( pszArg, "debug" ) )
+		return k_ESteamNetworkingSocketsDebugOutputType_Debug;
+
+	TEST_Fatal( "Invalid %s '%s'. Expected one of: msg, verbose, debug", pszSwitchName, pszArg );
+	return k_ESteamNetworkingSocketsDebugOutputType_Msg;
+}
 
 void Quit( int rc )
 {
@@ -49,6 +100,25 @@ void Quit( int rc )
 
 	TEST_Kill();
 	exit(rc);
+}
+
+// Print a parseable route summary for the active connection.
+// Output format: "TEST ROUTE: addr=<ip:port> type=<local|udp|relay>"
+void PrintRouteInfo()
+{
+	SteamNetConnectionInfo_t info;
+	if ( !SteamNetworkingSockets()->GetConnectionInfo( g_hConnection, &info ) )
+		return;
+	const char *pszType;
+	if ( info.m_nFlags & k_nSteamNetworkConnectionInfoFlags_Relayed )
+		pszType = "relay";
+	else if ( info.m_nFlags & k_nSteamNetworkConnectionInfoFlags_Fast )
+		pszType = "local";
+	else
+		pszType = "udp";
+	char szAddr[64];
+	info.m_addrRemote.ToString( szAddr, sizeof(szAddr), true );
+	TEST_Printf( "TEST ROUTE: addr=%s type=%s\n", szAddr, pszType );
 }
 
 // Send a simple string message to out peer, using reliable transport.
@@ -152,6 +222,11 @@ int main( int argc, const char **argv )
 	SteamNetworkingIdentity identityLocal; identityLocal.Clear();
 	SteamNetworkingIdentity identityRemote; identityRemote.Clear();
 	const char *pszTrivialSignalingService = "localhost:10000";
+	const char *pszSTUNServer = DEFAULT_STUN_SERVER;
+	int g_nICEImplementation = -1; // -1 = not set, use library default
+#ifdef STEAMNETWORKINGSOCKETS_ENABLE_MOCK
+	TEST_mocknetwork_config_t mockConfig;
+#endif
 
 	// Parse the command line
 	for ( int idxArg = 1 ; idxArg < argc ; ++idxArg )
@@ -175,6 +250,10 @@ int main( int argc, const char **argv )
 			ParseIdentity( identityRemote );
 		else if ( !strcmp( pszSwitch, "--signaling-server" ) )
 			pszTrivialSignalingService = GetArg();
+		else if ( !strcmp( pszSwitch, "--stun-server" ) )
+			pszSTUNServer = GetArg();
+		else if ( !strcmp( pszSwitch, "--ice-implementation" ) )
+			g_nICEImplementation = atoi( GetArg() );
 		else if ( !strcmp( pszSwitch, "--client" ) )
 			g_eTestRole = k_ETestRole_Client;
 		else if ( !strcmp( pszSwitch, "--server" ) )
@@ -185,6 +264,92 @@ int main( int argc, const char **argv )
 		{
 			const char *pszArg = GetArg();
 			TEST_InitLog( pszArg );
+		}
+		else if ( !strcmp( pszSwitch, "--spewlevel" ) || !strncmp( pszSwitch, "--spewlevel=", 12 ) )
+		{
+			const char *pszArg = pszSwitch[11] == '=' ? pszSwitch + 12 : GetArg();
+			ESteamNetworkingSocketsDebugOutputType eLogLevel = ParseLogLevelValue( pszArg, "--spewlevel" );
+			TEST_SetStdoutDetailLevel( eLogLevel );
+		}
+		else if ( !strcmp( pszSwitch, "--loglevel-p2prendezvous" ) || !strncmp( pszSwitch, "--loglevel-p2prendezvous=", 25 ) )
+		{
+			const char *pszArg = pszSwitch[24] == '=' ? pszSwitch + 25 : GetArg();
+			g_eTestP2PRendezvousLogLevel = ParseLogLevelValue( pszArg, "--loglevel-p2prendezvous" );
+		}
+#ifdef STEAMNETWORKINGSOCKETS_ENABLE_MOCK
+		else if ( !strcmp( pszSwitch, "--mock-gateway" ) )
+		{
+			const char *pszArg = GetArg();
+			TEST_mocknetwork_gateway_t gw;
+			if ( !gw.m_public_ip.ParseString( pszArg ) )
+				TEST_Fatal( "'%s' is not a valid IP address for --mock-gateway", pszArg );
+			gw.m_public_ip.m_port = 0;
+			mockConfig.m_vecGateways.push_back( gw );
+		}
+		else if ( !strcmp( pszSwitch, "--mock-nat" ) )
+		{
+			if ( mockConfig.m_vecGateways.empty() )
+				TEST_Fatal( "--mock-nat must follow --mock-gateway" );
+			const char *pszArg = GetArg();
+			TEST_mocknetwork_nat_type eNATType;
+			if ( !strcmp( pszArg, "full-cone" ) )
+				eNATType = TEST_mocknetwork_nat_type::FullCone;
+			else if ( !strcmp( pszArg, "restricted-cone" ) )
+				eNATType = TEST_mocknetwork_nat_type::RestrictedCone;
+			else if ( !strcmp( pszArg, "port-restricted-cone" ) )
+				eNATType = TEST_mocknetwork_nat_type::PortRestrictedCone;
+			else if ( !strcmp( pszArg, "symmetric" ) )
+				eNATType = TEST_mocknetwork_nat_type::Symmetric;
+			else
+				TEST_Fatal( "Invalid --mock-nat '%s'. Expected: full-cone, restricted-cone, port-restricted-cone, symmetric", pszArg );
+			mockConfig.m_vecGateways.back().m_natType = eNATType;
+		}
+		else if ( !strcmp( pszSwitch, "--mock-internal-latency" ) )
+		{
+			if ( mockConfig.m_vecGateways.empty() )
+				TEST_Fatal( "--mock-internal-latency must follow --mock-gateway" );
+			mockConfig.m_vecGateways.back().m_nInternalLatencyMS = atoi( GetArg() );
+		}
+		else if ( !strcmp( pszSwitch, "--mock-external-latency" ) )
+		{
+			if ( mockConfig.m_vecGateways.empty() )
+				TEST_Fatal( "--mock-external-latency must follow --mock-gateway" );
+			mockConfig.m_vecGateways.back().m_nExternalLatencyMS = atoi( GetArg() );
+		}
+		else if ( !strcmp( pszSwitch, "--mock-adapter" ) )
+		{
+			const char *pszArg = GetArg();
+			TEST_mocknetwork_interface_t iface;
+			if ( !iface.m_ip.ParseString( pszArg ) )
+				TEST_Fatal( "'%s' is not a valid IP address for --mock-adapter", pszArg );
+			iface.m_ip.m_port = 0;
+			iface.m_iGateway = mockConfig.m_vecGateways.empty() ? -1 : (int)mockConfig.m_vecGateways.size() - 1;
+			if ( iface.m_iGateway >= 0 )
+			{
+				const SteamNetworkingIPAddr &gwIP = mockConfig.m_vecGateways[ iface.m_iGateway ].m_public_ip;
+				if ( iface.m_ip.IsIPv4() != gwIP.IsIPv4() )
+					TEST_Fatal( "--mock-adapter '%s' address family does not match its gateway '%s'",
+						pszArg, SteamNetworkingIPAddrRender( gwIP, false ).c_str() );
+			}
+			mockConfig.m_vecInterfaces.push_back( iface );
+		}
+		else if ( !strcmp( pszSwitch, "--mock-latency" ) )
+		{
+			if ( mockConfig.m_vecInterfaces.empty() )
+				TEST_Fatal( "--mock-latency must follow --mock-adapter" );
+			mockConfig.m_vecInterfaces.back().m_nSendLatencyMS = atoi( GetArg() );
+		}
+		else if ( !strcmp( pszSwitch, "--mock-disabled" ) )
+		{
+			if ( mockConfig.m_vecInterfaces.empty() )
+				TEST_Fatal( "--mock-disabled must follow --mock-adapter" );
+			mockConfig.m_vecInterfaces.back().m_bEnabled = false;
+		}
+#endif
+		else if ( !strcmp( pszSwitch, "--help" ) || !strcmp( pszSwitch, "-h" ) )
+		{
+			PrintUsage();
+			exit(0);
 		}
 		else
 			TEST_Fatal( "Unexpected command line argument '%s'", pszSwitch );
@@ -197,11 +362,17 @@ int main( int argc, const char **argv )
 	if ( identityRemote.IsInvalid() && g_eTestRole != k_ETestRole_Server )
 		TEST_Fatal( "Must specify remote identity using --identity-remote" );
 
+#ifdef STEAMNETWORKINGSOCKETS_ENABLE_MOCK
+	if ( !mockConfig.m_vecInterfaces.empty() )
+		TEST_mocknetwork_init( mockConfig );
+#endif
+
 	// Initialize library, with the desired local identity
 	TEST_Init( &identityLocal );
 
-	// Hardcode STUN servers
-	SteamNetworkingUtils()->SetGlobalConfigValueString( k_ESteamNetworkingConfig_P2P_STUN_ServerList, "stun.l.google.com:19302" );
+	SteamNetworkingUtils()->SetGlobalConfigValueString( k_ESteamNetworkingConfig_P2P_STUN_ServerList, pszSTUNServer );
+	if ( g_nICEImplementation >= 0 )
+		SteamNetworkingUtils()->SetGlobalConfigValueInt32( k_ESteamNetworkingConfig_P2P_Transport_ICE_Implementation, g_nICEImplementation );
 
 	// Hardcode TURN servers
 	// comma seperated setting lists
@@ -229,7 +400,7 @@ int main( int argc, const char **argv )
 	SteamNetworkingUtils()->SetGlobalCallback_SteamNetConnectionStatusChanged( OnSteamNetConnectionStatusChanged );
 
 	// Comment this line in for more detailed spew about signals, route finding, ICE, etc
-	SteamNetworkingUtils()->SetGlobalConfigValueInt32( k_ESteamNetworkingConfig_LogLevel_P2PRendezvous, k_ESteamNetworkingSocketsDebugOutputType_Verbose );
+	SteamNetworkingUtils()->SetGlobalConfigValueInt32( k_ESteamNetworkingConfig_LogLevel_P2PRendezvous, g_eTestP2PRendezvousLogLevel );
 
 	// Create listen socket to receive connections on, unless we are the client
 	if ( g_eTestRole == k_ETestRole_Server )
@@ -341,6 +512,8 @@ int main( int argc, const char **argv )
 
 				// Free message struct and buffer.
 				pMessage->Release();
+
+				PrintRouteInfo();
 
 				// If we're the client, go ahead and shut down.  In this example we just
 				// wanted to establish a connection and exchange a message, and we've done that.

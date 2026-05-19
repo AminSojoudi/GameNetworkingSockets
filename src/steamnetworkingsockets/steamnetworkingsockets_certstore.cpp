@@ -78,8 +78,8 @@ void CertAuthParameter<T,kInvalidItem>::Setup( const T *pItems, int n )
 	std::sort( m_vecItems.begin(), m_vecItems.end() );
 
 	// Remove duplicates.  We assume both that duplicates are rare
-	// and lists are small, so that O(n^2) is OK here. 
-	for ( int i = len(m_vecItems)-1 ; i > 1 ; --i )
+	// and lists are small, so that O(n^2) is OK here.
+	for ( int i = len(m_vecItems)-1 ; i > 0 ; --i )
 	{
 		if ( m_vecItems[i-1] == m_vecItems[i] )
 			erase_at( m_vecItems, i );
@@ -603,7 +603,7 @@ const CertAuthScope *CertStore_CheckCASignature( const std::string &signed_data,
 		V_strcpy_safe( errMsg, "No signature" );
 		return nullptr;
 	}
-	
+
 	// Locate the cert
 	if ( nCAKeyID == 0 )
 	{
@@ -739,7 +739,7 @@ bool CheckCertAppID( const CMsgSteamDatagramCertificate &msgCert, const CertAuth
 		if ( !pCACertAuthScope || pCACertAuthScope->m_apps.HasItem( nAppID ) )
 			return true;
 		V_sprintf_safe( errMsg, "Cert is not restricted by appid, but CA trust chain is, and does not authorize %u", nAppID );
-		return true;
+		return false;
 	}
 
 	// Search cert for the one they are trying
@@ -775,7 +775,7 @@ bool CheckCertPOPID( const CMsgSteamDatagramCertificate &msgCert, const CertAuth
 		if ( !pCACertAuthScope || pCACertAuthScope->m_pops.HasItem( popID ) )
 			return true;
 		V_sprintf_safe( errMsg, "Cert is not restricted by POPID, but CA trust chain is, and does not authorize %s", SteamNetworkingPOPIDRender( popID ).c_str() );
-		return true;
+		return false;
 	}
 
 	// Search cert for the one they are trying

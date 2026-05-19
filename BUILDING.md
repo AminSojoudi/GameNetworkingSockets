@@ -57,10 +57,21 @@ $ cmake -G Ninja ..
 $ ninja
 ```
 
-## Using vcpkg to build the gamenetworkingsockets package
+## Using vcpkg to install the gamenetworkingsockets package
 
-If you are using [vcpkg](https://github.com/microsoft/vcpkg/) and are OK with the latest release and default configuration (OpenSSL for the crypto backend, P2P disabled), then you do not need to sync any of this code or build gamenetworkingsockets explicitly.  You can just install the package using vcpkg.  See [this example](examples/vcpkg_example_chat/README.md)
-for more.
+If you are using [vcpkg](https://github.com/microsoft/vcpkg/) and are OK with the latest release and default configuration (OpenSSL for the crypto backend, P2P disabled), then you do not need to sync any of this code or build gamenetworkingsockets explicitly.  You can install it directly from the vcpkg registry:
+
+```
+vcpkg install gamenetworkingsockets
+```
+
+Then include the headers in your project as, e.g.:
+
+```cpp
+#include <steam/steamnetworkingsockets.h>
+```
+
+See [this example](examples/vcpkg_example_chat/README.md) for more.
 
 ## Release-style builds: `scripts/ci/` (local and GitHub Actions)
 
@@ -250,58 +261,3 @@ $ export PKG_CONFIG_PATH=$PKG_CONFIG_PATH:/usr/local/opt/openssl@1.1/lib/pkgconf
 $ brew install protobuf
 ```
 
-## MSYS2
-
-You can also build this project on [MSYS2](https://www.msys2.org). First,
-follow the [instructions](https://www.msys2.org/wiki/MSYS2-installation) on the
-MSYS2 website for updating your MSYS2 install.
-
-**Be sure to follow the instructions at the site above to update MSYS2 before
-you continue. A fresh install is *not* up to date by default.**
-
-Next install the dependencies for building GameNetworkingSockets (if you want
-a 32-bit build, install the i686 versions of these packages):
-
-```
-$ pacman -S \
-    git \
-    mingw-w64-x86_64-gcc \
-    mingw-w64-x86_64-openssl \
-    mingw-w64-x86_64-pkg-config \
-    mingw-w64-x86_64-protobuf
-```
-
-And finally, clone the repository and build it:
-
-```
-$ git clone https://github.com/ValveSoftware/GameNetworkingSockets.git
-$ cd GameNetworkingSockets
-$ mkdir build
-$ cd build
-$ cmake -G Ninja ..
-$ ninja
-```
-
-**NOTE:** When building with MSYS2, be sure you launch the correct version of
-the MSYS2 terminal, as the three different Start menu entries will give you
-different environment variables that will affect the build.  You should run the
-Start menu item named `MSYS2 MinGW 64-bit` or `MSYS2 MinGW 32-bit`, depending
-on the packages you've installed and what architecture you want to build
-GameNetworkingSockets for.
-
-
-## Visual Studio Code
-If you're using Visual Studio Code, we have a few extensions to recommend
-installing, which will help build the project. Once you have these extensions
-installed, open up the .code-workspace file in Visual Studio Code.
-
-### C/C++ by Microsoft
-This extension provides IntelliSense support for C/C++.
-
-VS Marketplace Link: https://marketplace.visualstudio.com/items?itemName=ms-vscode.cpptools
-
-### CMake Tools by vector-of-bool
-This extension allows for configuring the CMake project and building it from
-within the Visual Studio Code IDE.
-
-VS Marketplace Link: https://marketplace.visualstudio.com/items?itemName=vector-of-bool.cmake-tools

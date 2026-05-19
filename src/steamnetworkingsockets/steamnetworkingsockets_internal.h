@@ -133,7 +133,7 @@
 
 enum EDualWifiEnable {
 	k_nDualWifiEnable_Disable = 0,
-	k_nDualWifiEnable_Enable = 1, // 
+	k_nDualWifiEnable_Enable = 1, //
 	k_nDualWifiEnable_DoNotEnumerate = 2, // Enumerate primary adapters, but don't actually try to enable any Dual Wifi support
 	k_nDualWifiEnable_DoNotBind = 3, // Try to turn on Dual Wifi and locate the secondary adapter, but don't actually bind
 	k_nDualWifiEnable_ForceSimulate = 4, // Don't really do any DualWifi work, just open up another "regular" socket
@@ -208,6 +208,18 @@ struct iovec
 		#define unlikely(x) __builtin_expect (!!(x), 0)
 	#endif
 #else
+	// Nested check avoids MSVC preprocessor parse error (C1012) when
+	// __has_builtin(...) appears in a single #if expression alongside ||.
+	#ifdef __has_builtin
+		#if __has_builtin(__builtin_expect)
+			#ifndef likely
+				#define likely(x) __builtin_expect (!!(x), 1)
+			#endif
+			#ifndef unlikely
+				#define unlikely(x) __builtin_expect (!!(x), 0)
+			#endif
+		#endif
+	#endif
 	#ifndef likely
 		#define likely(x) (x)
 	#endif
@@ -275,10 +287,6 @@ const int k_cbSteamNetworkingSocketsTypicalMaxPlaintextPayloadSend = k_cbSteamNe
 const int k_cbSteamNetworkingSocketsMaxEncryptedPayloadRecv = k_cbSteamNetworkingSocketsMaxUDPMsgLen;
 const int k_cbSteamNetworkingSocketsMaxPlaintextPayloadRecv = k_cbSteamNetworkingSocketsMaxUDPMsgLen;
 
-/// Max value that RecvMaxMessageSize can be set to.
-const int k_cbMaxMessageSizeRecv_Limit = k_cbMaxSteamNetworkingSocketsMessageSizeSend*2;
-COMPILE_TIME_ASSERT( k_cbMaxMessageSizeRecv_Limit >= k_cbMaxSteamNetworkingSocketsMessageSizeSend*2 );
-
 /// If we have a cert that is going to expire in <N seconds, try to renew it
 const int k_nSecCertExpirySeekRenew = 3600*2;
 
@@ -290,6 +298,11 @@ COMPILE_TIME_ASSERT( k_cbSteamNetworkingSocketsMaxEncryptedPayloadSend + 50 < k_
 
 /// Min size of raw UDP message.
 const int k_nMinSteamDatagramUDPMsgLen = 5;
+
+/// Max message size we will actually send, internally.  This is a bit of a kludge because the ISteamNetworkingMessages
+/// API prepends messages with a small header, and we want users of that API to be able to use the full message size,
+/// without having to know about this internal header.
+const int k_cbMaxSteamNetworkingSocketsMessageSizeSend_Internal = k_cbMaxSteamNetworkingSocketsMessageSizeSend + 16;
 
 /// When sending a stats message, what sort of reply is requested by the calling code?
 enum EStatsReplyRequest
@@ -364,13 +377,13 @@ constexpr int k_nRouteScoreHuge = INT_MAX/8;
 /// Protocol version of this code.  This is a blunt instrument, which is incremented when we
 /// wish to change the wire protocol in a way that doesn't have some other easy
 /// mechanism for dealing with compatibility (e.g. using protobuf's robust mechanisms).
-const uint32 k_nCurrentProtocolVersion = 12;
+const uint32 k_nCurrentProtocolVersion = 13;
 
 /// Minimum required version we will accept from a peer.  We increment this
 /// when we introduce wire breaking protocol changes and do not wish to be
 /// backward compatible.  This has been fine before the	first major release,
 /// but once we make a big public release, we probably won't ever be able to
-/// do this again, and we'll need to have more sophisticated mechanisms. 
+/// do this again, and we'll need to have more sophisticated mechanisms.
 const uint32 k_nMinRequiredProtocolVersion = 8;
 
 /// SteamNetworkingMessages is built on top of SteamNetworkingSockets.  We use a reserved
@@ -469,19 +482,21 @@ inline int VarIntSerializedSize( uint64 x )
 
 // De-serialize a var-int encoded quantity.  Returns pointer to the next byte,
 // or NULL if there was a decoding error (we hit the end of stream.)
-// https://developers.google.com/protocol-buffers/docs/encoding
-//
-// NOTE: We do not detect overflow.
+// https://developers.google.com/protocol-buffers/docs/encoding/
 template <typename T>
 inline byte *DeserializeVarInt( byte *p, const byte *end, T &x )
 {
-	if ( p >= end )
+	if ( unlikely( p >= end ) )
 		return nullptr;
+	const byte *max_end = p + ( (sizeof(T)*8 + 6) / 7 );
+	if ( end > max_end )
+		end = max_end;
+
 	T nResult = *p & 0x7f; // use local variable for working, to make sure compiler doesn't try to worry about pointer aliasing
 	unsigned nShift = 7;
 	while ( *(p++) & 0x80 )
 	{
-		if ( p >= end )
+		if ( unlikely( p >= end ) )
 			return nullptr;
 		nResult |= ( T( *p & 0x7f ) << nShift );
 		nShift += 7;
@@ -856,7 +871,7 @@ struct ConnectionConfig
 	ConfigValue<int32> SendBufferSize;
 	ConfigValue<int32> RecvBufferSize;
 	ConfigValue<int32> RecvBufferMessages;
-	ConfigValue<int32> RecvMaxMessageSize;
+	ConfigValue<int32> RecvMaxMessageSize; // NOTE - use GetEffectiveRecvMaxMessageSize()!
 	ConfigValue<int32> RecvMaxSegmentsPerPacket;
 	ConfigValue<int32> SendRateMin;
 	ConfigValue<int32> SendRateMax;
@@ -1611,7 +1626,7 @@ namespace vstd
 		{
 			// We need dynamic memory.  If we're not exactly sized already,
 			// just nuke everyhing we have.
-			if ( n != capacity_ ) 
+			if ( n != capacity_ )
 			{
 				clear();
 				reserve( n );

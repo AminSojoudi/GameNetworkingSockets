@@ -31,7 +31,7 @@
 		#error "Unrecognized PS3 compiler; either __SNC__ or __GCC__ must be defined"
 	#endif
 
-#endif // SN_TARGET_PS3 
+#endif // SN_TARGET_PS3
 
 #if !defined(COMPILER_GCC) && (defined(__GCC__) || defined(__GNUC__))
 	#define COMPILER_GCC 1
@@ -101,13 +101,26 @@
 
 
 #ifdef _RETAIL
-	#define IsRetail() true 
+	#define IsRetail() true
 #else
 	#define IsRetail() false
 #endif
 
 #ifdef IsPosix
 	#error "Running platform detection twice, or defining IsPosix too soon"
+#endif
+
+// Make sure exactly one of NDEBUG or _DEBUG is defined.  NDEBUG is the C/C++ standard,
+// but we have lots of code that is checking _DEBUG, which is a MSVC convention
+#if defined(NDEBUG) && defined(_DEBUG)
+	#error "Cannot define both NDEBUG and _DEBUG."
+#endif
+#if !defined(NDEBUG) && !defined(_DEBUG)
+	#ifdef _MSC_VER
+		#error "On MSVC, exactly one of NDEBUG or _DEBUG must be defined.  Check your project files."
+	#else
+		#define _DEBUG
+	#endif
 #endif
 
 #ifdef _DEBUG
@@ -165,6 +178,12 @@
 	#endif
 #elif defined( LINUX ) || defined( __LINUX__ ) || defined(linux) || defined(__linux) || defined(__linux__)
 	#define IsLinux() true
+	#define IsPosix() true
+#elif defined(__FreeBSD__)
+	#define IsFreeBSD() true
+	#define IsPosix() true
+#elif defined(__OpenBSD__)
+	#define IsOpenBSD() true
 	#define IsPosix() true
 #elif defined( _POSIX_VERSION ) || defined( POSIX ) || defined( VALVE_POSIX )
 	#define IsPosix() true
@@ -228,6 +247,12 @@
 #endif
 #ifndef IsOSX
 	#define IsOSX() false
+#endif
+#ifndef IsFreeBSD
+	#define IsFreeBSD() false
+#endif
+#ifndef IsOpenBSD
+	#define IsOpenBSD() false
 #endif
 
 // Detect ARM

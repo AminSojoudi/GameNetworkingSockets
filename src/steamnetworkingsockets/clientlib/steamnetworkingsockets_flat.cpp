@@ -65,9 +65,9 @@ STEAMNETWORKINGSOCKETS_INTERFACE EResult SteamAPI_ISteamNetworkingSockets_SendMe
 {
 	return self->SendMessageToConnection( hConn,pData,cbData,nSendFlags,pOutMessageNumber );
 }
-STEAMNETWORKINGSOCKETS_INTERFACE void SteamAPI_ISteamNetworkingSockets_SendMessages( ISteamNetworkingSockets* self, int nMessages, SteamNetworkingMessage_t *const * pMessages, int64 * pOutMessageNumberOrResult )
+STEAMNETWORKINGSOCKETS_INTERFACE void SteamAPI_ISteamNetworkingSockets_SendMessages( ISteamNetworkingSockets* self, int nMessages, SteamNetworkingMessage_t ** pMessages, int64 * pOutMessageNumberOrResult, bool bDeleteFailedMessages )
 {
-	self->SendMessages( nMessages,pMessages,pOutMessageNumberOrResult );
+	self->SendMessages( nMessages,pMessages,pOutMessageNumberOrResult,bDeleteFailedMessages );
 }
 STEAMNETWORKINGSOCKETS_INTERFACE EResult SteamAPI_ISteamNetworkingSockets_FlushMessagesOnConnection( ISteamNetworkingSockets* self, HSteamNetConnection hConn )
 {
@@ -93,9 +93,9 @@ STEAMNETWORKINGSOCKETS_INTERFACE bool SteamAPI_ISteamNetworkingSockets_GetListen
 {
 	return self->GetListenSocketAddress( hSocket,address );
 }
-STEAMNETWORKINGSOCKETS_INTERFACE bool SteamAPI_ISteamNetworkingSockets_CreateSocketPair( ISteamNetworkingSockets* self, HSteamNetConnection * pOutConnection1, HSteamNetConnection * pOutConnection2, bool bUseNetworkLoopback, const SteamNetworkingIdentity * pIdentity1, const SteamNetworkingIdentity * pIdentity2 )
+STEAMNETWORKINGSOCKETS_INTERFACE bool SteamAPI_ISteamNetworkingSockets_CreateSocketPair( ISteamNetworkingSockets* self, HSteamNetConnection * pOutConnection1, HSteamNetConnection * pOutConnection2, bool bUseNetworkLoopback, const SteamNetworkingIdentity * pPeerIdentity1, const SteamNetworkingIdentity * pPeerIdentity2 )
 {
-	return self->CreateSocketPair( pOutConnection1,pOutConnection2,bUseNetworkLoopback,pIdentity1,pIdentity2 );
+	return self->CreateSocketPair( pOutConnection1,pOutConnection2,bUseNetworkLoopback,pPeerIdentity1,pPeerIdentity2 );
 }
 STEAMNETWORKINGSOCKETS_INTERFACE EResult SteamAPI_ISteamNetworkingSockets_ConfigureConnectionLanes( ISteamNetworkingSockets* self, HSteamNetConnection hConn, int nNumLanes, const int * pLanePriorities, const uint16 * pLaneWeights )
 {
@@ -313,6 +313,37 @@ STEAMNETWORKINGSOCKETS_INTERFACE const char * SteamAPI_ISteamNetworkingUtils_Get
 STEAMNETWORKINGSOCKETS_INTERFACE ESteamNetworkingConfigValue SteamAPI_ISteamNetworkingUtils_IterateGenericEditableConfigValues( ISteamNetworkingUtils* self, ESteamNetworkingConfigValue eCurrent, bool bEnumerateDevVars )
 {
 	return self->IterateGenericEditableConfigValues( eCurrent,bEnumerateDevVars );
+}
+
+//--- ISteamNetworkingMessages-------------------------
+
+STEAMNETWORKINGSOCKETS_INTERFACE ISteamNetworkingMessages *SteamAPI_SteamNetworkingMessages_v002()
+{
+	return SteamNetworkingMessages();
+}
+STEAMNETWORKINGSOCKETS_INTERFACE EResult SteamAPI_ISteamNetworkingMessages_SendMessageToUser( ISteamNetworkingMessages* self, const SteamNetworkingIdentity & identityRemote, const void * pubData, uint32 cubData, int nSendFlags, int nRemoteChannel )
+{
+	return self->SendMessageToUser( identityRemote,pubData,cubData,nSendFlags,nRemoteChannel );
+}
+STEAMNETWORKINGSOCKETS_INTERFACE int SteamAPI_ISteamNetworkingMessages_ReceiveMessagesOnChannel( ISteamNetworkingMessages* self, int nLocalChannel, SteamNetworkingMessage_t ** ppOutMessages, int nMaxMessages )
+{
+	return self->ReceiveMessagesOnChannel( nLocalChannel,ppOutMessages,nMaxMessages );
+}
+STEAMNETWORKINGSOCKETS_INTERFACE bool SteamAPI_ISteamNetworkingMessages_AcceptSessionWithUser( ISteamNetworkingMessages* self, const SteamNetworkingIdentity & identityRemote )
+{
+	return self->AcceptSessionWithUser( identityRemote );
+}
+STEAMNETWORKINGSOCKETS_INTERFACE bool SteamAPI_ISteamNetworkingMessages_CloseSessionWithUser( ISteamNetworkingMessages* self, const SteamNetworkingIdentity & identityRemote )
+{
+	return self->CloseSessionWithUser( identityRemote );
+}
+STEAMNETWORKINGSOCKETS_INTERFACE bool SteamAPI_ISteamNetworkingMessages_CloseChannelWithUser( ISteamNetworkingMessages* self, const SteamNetworkingIdentity & identityRemote, int nLocalChannel )
+{
+	return self->CloseChannelWithUser( identityRemote,nLocalChannel );
+}
+STEAMNETWORKINGSOCKETS_INTERFACE ESteamNetworkingConnectionState SteamAPI_ISteamNetworkingMessages_GetSessionConnectionInfo( ISteamNetworkingMessages* self, const SteamNetworkingIdentity & identityRemote, SteamNetConnectionInfo_t * pConnectionInfo, SteamNetConnectionRealTimeStatus_t * pQuickStatus )
+{
+	return self->GetSessionConnectionInfo( identityRemote,pConnectionInfo,pQuickStatus );
 }
 
 //--- SteamNetworkingIPAddr-------------------------

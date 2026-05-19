@@ -3,15 +3,15 @@
 // Include the relevant platform-specific headers for socket-related
 // stuff, and declare some functions make them look as similar to
 // plain BSD sockets as possible.
-// 
+//
 // This includes a bunch of stuff.  DO NOT INCLUDE THIS FROM A HEADER
 //
 // Some things that will be defined by this file:
-// 
+//
 // closesocket()
 // GetLastSocketError()
 // SetSocketNonBlocking()
-// 
+//
 // USE_EPOLL or USE_POLL
 // If USE_EPOLL:
 //		EPollHandle, INVALID_EPOLL_HANDLE, EPollCreate()
@@ -112,13 +112,47 @@ typedef char SteamNetworkingErrMsg[ 1024 ];
 
 	#define PlatformSupportsRecvMsg() true
 
-	#ifdef __APPLE__
+	#if defined(__APPLE__)
+
+		// OSX provides kqueue, but we don't support it, so just use old-school poll()
 		#define USE_POLL
 
-		// I can't get this to work on MacOS.  If someboddy believes that
-		// it should work, I would appreciate the help.
-		#define PlatformSupportsRecvTOS() false
+		#define PlatformSupportsRecvTOS() true
 
+		// Depending on compiler flags, these might not be defined.  But they are
+		// part of the kernel ABI, so hardcoding the value is safe.
+		#ifdef IP_RECVTOS
+			COMPILE_TIME_ASSERT( IP_RECVTOS == 27 );
+		#else
+			#define IP_RECVTOS 27
+		#endif
+		#ifdef IPV6_RECVTCLASS
+			COMPILE_TIME_ASSERT( IPV6_RECVTCLASS == 35 );
+		#else
+			#define IPV6_RECVTCLASS 35
+		#endif
+		#ifdef IPV6_TCLASS
+			COMPILE_TIME_ASSERT( IPV6_TCLASS == 36 );
+		#else
+			#define IPV6_TCLASS 36
+		#endif
+
+	#elif defined(__FreeBSD__)
+
+		// FreeBSD provides kqueue, but we don't support it, so just use old-school poll()
+		#define USE_POLL
+
+		// Does this work?  If somebody who uses FreeBSD
+		// wants to test, I would appreciate it!
+		#define PlatformSupportsRecvTOS() false
+	#elif defined(__OpenBSD__)
+
+		// OpenBSD provides kqueue, but we don't support it, so just use old-school poll()
+		#define USE_POLL
+
+		// Does this work?  If somebody who uses OpenBSD
+		// wants to test, I would appreciate it!
+		#define PlatformSupportsRecvTOS() false
 	#else
 		#define USE_EPOLL
 		#include <sys/epoll.h>

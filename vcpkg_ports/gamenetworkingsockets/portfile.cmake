@@ -43,25 +43,22 @@ if (BUILD_TESTS OR BUILD_TOOLS)
 	set(BUILD_STATIC_LIB true)
 endif()
 
-vcpkg_configure_cmake(
-    SOURCE_PATH ${SOURCE_PATH}
-    PREFER_NINJA
+vcpkg_cmake_configure(
+    SOURCE_PATH "${SOURCE_PATH}"
     OPTIONS
-    -DUSE_CRYPTO=${CRYPTO_BACKEND}
-	-DBUILD_STATIC_LIB=${BUILD_STATIC_LIB}
-	-DBUILD_SHARED_LIB=${BUILD_SHARED_LIB}
-	-DMSVC_CRT_STATIC=${MSVC_CRT_STATIC}
-    ${FEATURE_OPTIONS}
+        -DUSE_CRYPTO=${CRYPTO_BACKEND}
+        -DBUILD_STATIC_LIB=${BUILD_STATIC_LIB}
+        -DBUILD_SHARED_LIB=${BUILD_SHARED_LIB}
+        -DMSVC_CRT_STATIC=${MSVC_CRT_STATIC}
+        ${FEATURE_OPTIONS}
 )
 
 vcpkg_cmake_install()
+vcpkg_cmake_config_fixup(CONFIG_PATH "lib/cmake/GameNetworkingSockets")
+vcpkg_fixup_pkgconfig()
 
-# Copy some files
-
-file(INSTALL ${SOURCE_PATH}/LICENSE DESTINATION ${CURRENT_PACKAGES_DIR}/share/${PORT} RENAME copyright)
-vcpkg_copy_pdbs()
-
-# Cleanup some file droppings that our cmakefile really should
-# not be publishing
 file(REMOVE_RECURSE "${CURRENT_PACKAGES_DIR}/debug/share")
 file(REMOVE_RECURSE "${CURRENT_PACKAGES_DIR}/debug/include")
+
+vcpkg_copy_pdbs()
+vcpkg_install_copyright(FILE_LIST "${SOURCE_PATH}/LICENSE")

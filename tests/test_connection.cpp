@@ -15,14 +15,18 @@
 #include <steam/steam_api.h>
 #endif
 
-#define PORT_SERVER			27200	// Default server port, UDP/TCP
-
 // It's 2021 and the C language doesn't have a cross-platform way to
 // compare strings in a case-insensitive way
 #ifdef _MSC_VER
 	#define strcasecmp(a,b) stricmp(a,b)
 #endif
 
+enum class ETestConnectionMode
+{
+	Cursory, // Very fast sanity check: 1 condition, short durations
+	Normal,  // Standard: 2 conditions, moderate durations
+	Soak,    // Exhaustive: all conditions, long durations
+};
 
 static std::default_random_engine g_rand;
 static SteamNetworkingMicroseconds g_usecTestElapsed;
@@ -134,29 +138,29 @@ struct SFakePeer
 		m_nSendInterval += cbSend;
 
 		EResult result = SteamNetworkingSockets()->SendMessageToConnection(
-			m_hSteamNetConnection, 
+			m_hSteamNetConnection,
 			&msg,
 			cbSend,
 			msg.m_bReliable ? k_nSteamNetworkingSend_Reliable : k_nSteamNetworkingSend_Unreliable, nullptr );
 
 		if ( result != k_EResultOK )
 		{
-			TEST_Printf( "***ERROR ON Send: %s %.3f %s message %lld, %d bytes (pending %d bytes)\n", 
-				 m_sName.c_str(), 
+			TEST_Printf( "***ERROR ON Send: %s %.3f %s message %lld, %d bytes (pending %d bytes)\n",
+				 m_sName.c_str(),
 				 g_usecTestElapsed*1e-6,
 				 msg.m_bReliable ? "reliable" : "unreliable",
-				 (long long)msg.m_nMsgNum, 
+				 (long long)msg.m_nMsgNum,
 				 msg.m_cbSize,
 				 GetQueuedSendBytes() );
 			abort();
 		}
 	#if 0
 		else
-			TEST_Printf( "Send: %s %.3f %s message %lld, %d bytes (pending %d bytes)\n", 
-				 connection.m_sName.c_str(), 
+			TEST_Printf( "Send: %s %.3f %s message %lld, %d bytes (pending %d bytes)\n",
+				 connection.m_sName.c_str(),
 				 g_usecTestElapsed*1e-6,
 				 msg.m_bReliable ? "reliable" : "unreliable",
-				 (long long)msg.m_nMsgNum, 
+				 (long long)msg.m_nMsgNum,
 				 msg.m_cbSize,
 				 GetQueuedSendBytes() );
 	#endif
@@ -359,7 +363,7 @@ static void ClearConfig()
 	}
 }
 
-static void TestNetworkConditions( int rate, float loss, int lag, float reorderPct, int reorderLag, bool bActLikeGame, bool bQuickTest )
+static void TestNetworkConditions( int rate, float loss, int lag, float reorderPct, int reorderLag, bool bActLikeGame, ETestConnectionMode eMode )
 {
 	ISteamNetworkingSockets *pSteamSocketNetworking = SteamNetworkingSockets();
 
@@ -384,14 +388,18 @@ static void TestNetworkConditions( int rate, float loss, int lag, float reorderP
 
 	SteamNetworkingMicroseconds usecWhenStarted = SteamNetworkingUtils()->GetLocalTimestamp();
 
-	// Loop!
+	struct Timing { double flQuietSec; double flActiveSec; float flPrintIntervalSec; int nIterations; };
+	static const Timing k_timing[] = {
+		{ 0.5,  2.0, 1.0f, 1 }, // Cursory
+		{ 1.0,  5.0, 2.0f, 2 }, // Normal
+		{ 8.0, 25.0, 5.0f, 4 }, // Soak
+	};
+	const Timing &timing = k_timing[ (int)eMode ];
 
-	//SteamNetworkingMicroseconds usecLastNow = usecWhenStarted;
-
-	SteamNetworkingMicroseconds usecQuietDuration  = SteamNetworkingMicroseconds( ( bQuickTest ? 1.0 :  8.0 ) * 1e6 );
-	SteamNetworkingMicroseconds usecActiveDuration = SteamNetworkingMicroseconds( ( bQuickTest ? 5.0 : 25.0 ) * 1e6 );
-	float flWaitBetweenPrints = bQuickTest ? 2.0f : 5.0f;
-	int nIterations = bQuickTest ? 2 : 4;
+	SteamNetworkingMicroseconds usecQuietDuration  = SteamNetworkingMicroseconds( timing.flQuietSec  * 1e6 );
+	SteamNetworkingMicroseconds usecActiveDuration = SteamNetworkingMicroseconds( timing.flActiveSec * 1e6 );
+	float flWaitBetweenPrints = timing.flPrintIntervalSec;
+	int nIterations = timing.nIterations;
 
 	bool bQuiet = true;
 	SteamNetworkingMicroseconds usecWhenStateEnd = 0;
@@ -415,7 +423,7 @@ static void TestNetworkConditions( int rate, float loss, int lag, float reorderP
 		int nServerPending = g_peerServer.GetQueuedSendBytes();
 		int nClientPending = g_peerClient.GetQueuedSendBytes();
 
-		bool bCheckStateChange = ( usecWhenStateEnd == 0 ); 
+		bool bCheckStateChange = ( usecWhenStateEnd == 0 );
 		float flElapsedPrint = ( now - usecLastPrint ) * 1e-6f;
 		if ( flElapsedPrint > flWaitBetweenPrints )
 		{
@@ -483,38 +491,24 @@ static void TestNetworkConditions( int rate, float loss, int lag, float reorderP
 	}
 }
 
-static void Test_Connection( bool bQuickTest )
+static void Test_Connection( ETestConnectionMode eMode, const SteamNetworkingIPAddr &addrServerBind, const SteamNetworkingIPAddr &addrClientConnect )
 {
+	static const char *const k_rgszModeName[] = { "Cursory", "Normal", "Soak" };
+	TEST_Printf( "***************************************************\n" );
+	TEST_Printf( "Mode:           %s\n", k_rgszModeName[ (int)eMode ] );
+	TEST_Printf( "Server bind:    %s\n", SteamNetworkingIPAddrRender( addrServerBind ).c_str() );
+	TEST_Printf( "Client connect: %s\n", SteamNetworkingIPAddrRender( addrClientConnect ).c_str() );
+	TEST_Printf( "***************************************************\n" );
+
 	SteamNetworkingUtils()->SetGlobalCallback_SteamNetConnectionStatusChanged( OnSteamNetConnectionStatusChanged );
 
 	CloseConnections();
 
 	ISteamNetworkingSockets *pSteamSocketNetworking = SteamNetworkingSockets();
 
-	// Command line options:
-	// -connect:ip -- don't create a server, just try to connect to the given ip
-	// -serveronly -- don't create a client only create a server and wait for connection
-	SteamNetworkingIPAddr bindServerAddress;
-	bindServerAddress.Clear();
-	bindServerAddress.m_port = PORT_SERVER;
-
-	SteamNetworkingIPAddr connectToServerAddress;
-	connectToServerAddress.SetIPv4( 0x7f000001, PORT_SERVER );
-
-	//const char *s_pszConnectParm = "-connect:";
-	//for ( int i = 0; i < CommandLine()->ParmCount(); ++i )
-	//{
-	//	if ( V_strnicmp( CommandLine()->GetParm( i ), s_pszConnectParm, V_strlen( s_pszConnectParm ) ) == 0 )
-	//	{
-	//		bClientOnly = true;
-	//		connection_adr.SetFromString( CommandLine()->GetParm( i ) + V_strlen( s_pszConnectParm ) );
-	//		break;
-	//	}
-	//}
-
 	// Initiate connection
-	g_hSteamListenSocket = pSteamSocketNetworking->CreateListenSocketIP( bindServerAddress, 0, nullptr );
-	g_peerClient.m_hSteamNetConnection = pSteamSocketNetworking->ConnectByIPAddress( connectToServerAddress, 0, nullptr );
+	g_hSteamListenSocket = pSteamSocketNetworking->CreateListenSocketIP( addrServerBind, 0, nullptr );
+	g_peerClient.m_hSteamNetConnection = pSteamSocketNetworking->ConnectByIPAddress( addrClientConnect, 0, nullptr );
 	pSteamSocketNetworking->SetConnectionName( g_peerClient.m_hSteamNetConnection, "Client" );
 
 	g_peerClient.SetConnectionConfig();
@@ -528,15 +522,18 @@ static void Test_Connection( bool bQuickTest )
 	while ( !g_peerClient.m_bIsConnected || !g_peerServer.m_bIsConnected )
 		TEST_PumpCallbacks();
 
-	auto Test = [bQuickTest]( int rate, float loss, int lag, float reorderPct, int reorderLag )
+	auto Test = [eMode]( int rate, float loss, int lag, float reorderPct, int reorderLag )
 	{
-		TestNetworkConditions( rate, loss, lag, reorderPct, reorderLag, false, bQuickTest );
-		TestNetworkConditions( rate, loss, lag, reorderPct, reorderLag, true, bQuickTest );
+		TestNetworkConditions( rate, loss, lag, reorderPct, reorderLag, false, eMode );
+		TestNetworkConditions( rate, loss, lag, reorderPct, reorderLag, true, eMode );
 	};
 
-	if ( bQuickTest )
+	if ( eMode == ETestConnectionMode::Cursory )
 	{
-		// Quick test, just do two situations
+		Test(  128000, 10, 50, 2, 50 ); // Low bandwidth, high packet loss
+	}
+	else if ( eMode == ETestConnectionMode::Normal )
+	{
 		Test(  128000, 10, 50, 2, 50 ); // Low bandwidth, high packet loss
 		Test( 1000000,  5, 10, 1, 10 ); // Medium bandwidth, still pretty bad packet loss
 	}
@@ -561,10 +558,59 @@ static void Test_Connection( bool bQuickTest )
 		Test( 64000, 5, 50, 2, 50 );
 		Test( 1000000, 5, 50, 2, 10 );
 	}
+
+	CloseConnections();
 }
 
-static void Test_quick() { Test_Connection( true ); }
-static void Test_soak() { Test_Connection( false ); }
+const int k_nStartingServerPort = 27200;
+
+static void Test_quick()
+{
+	uint16 nServerPort = k_nStartingServerPort;
+	SteamNetworkingIPAddr bindAddr, connectAddr;
+
+	//
+	// First, do some 'cursory' connection tests between various combiantions of IPv4, IPc6, and dual-stack.
+	// This is really just to make sure we can connect and exchange packets.
+	//
+
+	// IPv4-only server, IPv4 client
+	bindAddr.SetIPv4( 0, nServerPort );
+	connectAddr.SetIPv4( 0x7f000001, nServerPort );
+	Test_Connection( ETestConnectionMode::Cursory, bindAddr, connectAddr );
+	++nServerPort;
+
+	// IPv6-only server, IPv6 client
+	bindAddr.SetIPv6LocalHost( nServerPort );
+	connectAddr.SetIPv6LocalHost( nServerPort );
+	Test_Connection( ETestConnectionMode::Cursory, bindAddr, connectAddr );
+	++nServerPort;
+
+	// Dual-stack server, IPv6 client
+	bindAddr.Clear(); bindAddr.m_port = nServerPort;
+	connectAddr.SetIPv6LocalHost( nServerPort );
+	Test_Connection( ETestConnectionMode::Cursory, bindAddr, connectAddr );
+	++nServerPort;
+
+	//
+	// Now do a 'normal' test
+	//
+	// Dual-stack server, IPv4 client (IPv4-mapped path)
+	bindAddr.Clear(); bindAddr.m_port = nServerPort;
+	connectAddr.SetIPv4( 0x7f000001, nServerPort );
+	Test_Connection( ETestConnectionMode::Normal, bindAddr, connectAddr );
+}
+
+static void Test_soak()
+{
+	uint16 nServerPort = k_nStartingServerPort;
+	SteamNetworkingIPAddr bindAddr, connectAddr;
+
+	// Dual-stack server, IPv4 client (IPv4-mapped path)
+	bindAddr.Clear(); bindAddr.m_port = nServerPort;
+	connectAddr.SetIPv4( 0x7f000001, nServerPort );
+	Test_Connection( ETestConnectionMode::Soak, bindAddr, connectAddr );
+}
 
 // Some tests for identity string handling.  Doesn't really have anything to do with
 // connectivity, this is just a conveinent place for this to live
@@ -616,7 +662,21 @@ void Test_lane_quick_queueanddrain()
 	// (With a loopback over internal buffers, all messages
 	// are delivered instantly and lanes are irrelevant.)
 	HSteamNetConnection hSender, hRecver;
-	assert( SteamNetworkingSockets()->CreateSocketPair( &hSender, &hRecver, true, nullptr, nullptr ) );
+	SteamNetworkingIdentity identSender, identRecver;
+	identSender.SetGenericString( "sender" );
+	identRecver.SetGenericString( "receiver" );
+	// NOTE: each pPeerIdentity argument is the remote identity observed by the
+	// *corresponding* connection, so pass them swapped relative to the connection handles.
+	assert( SteamNetworkingSockets()->CreateSocketPair( &hSender, &hRecver, true, &identRecver, &identSender ) );
+
+	// Verify: hSender sees "receiver" as its remote peer, hRecver sees "sender".
+	{
+		SteamNetConnectionInfo_t connInfoSender, connInfoRecver;
+		assert( SteamNetworkingSockets()->GetConnectionInfo( hSender, &connInfoSender ) );
+		assert( SteamNetworkingSockets()->GetConnectionInfo( hRecver, &connInfoRecver ) );
+		assert( connInfoSender.m_identityRemote == identRecver );
+		assert( connInfoRecver.m_identityRemote == identSender );
+	}
 
 	// Set the send rate to a fixed value
 	const int k_nSendRate = 128*1024;
@@ -657,7 +717,7 @@ void Test_lane_quick_queueanddrain()
 			}
 		}
 		assert( idxMsg == k_nTotalMsg );
-		SteamNetworkingSockets()->SendMessages( idxMsg, pMessages, nullptr );
+		SteamNetworkingSockets()->SendMessages( idxMsg, pMessages, nullptr, true );
 	}
 
 	// Remember when we sent all the messages
@@ -725,7 +785,7 @@ void Test_lane_quick_queueanddrain()
 			pMsg->m_idxLane = (uint16)idxLane;
 			pMessages[idxLane] = pMsg;
 		}
-		SteamNetworkingSockets()->SendMessages( k_nLanes, pMessages, nullptr );
+		SteamNetworkingSockets()->SendMessages( k_nLanes, pMessages, nullptr, true );
 	}
 
 	int cbLaneReceived[k_nLanes] = {};
@@ -817,9 +877,23 @@ void Test_lane_quick_priority_and_background()
 	// (With a loopback over internal buffers, all messages
 	// are delivered instantly and lanes are irrelevant.)
 	HSteamNetConnection hServer, hClient;
-	assert( SteamNetworkingSockets()->CreateSocketPair( &hServer, &hClient, true, nullptr, nullptr ) );
+	SteamNetworkingIdentity identServer, identClient;
+	identServer.SetGenericString( "server" );
+	identClient.SetGenericString( "client" );
+	// NOTE: each pPeerIdentity argument is the remote identity observed by the
+	// *corresponding* connection, so pass them swapped relative to the connection handles.
+	assert( SteamNetworkingSockets()->CreateSocketPair( &hServer, &hClient, true, &identClient, &identServer ) );
 	SteamNetworkingSockets()->SetConnectionName( hServer, "server" );
 	SteamNetworkingSockets()->SetConnectionName( hClient, "client" );
+
+	// Verify: hServer sees "client" as its remote peer, hClient sees "server".
+	{
+		SteamNetConnectionInfo_t connInfoServer, connInfoClient;
+		assert( SteamNetworkingSockets()->GetConnectionInfo( hServer, &connInfoServer ) );
+		assert( SteamNetworkingSockets()->GetConnectionInfo( hClient, &connInfoClient ) );
+		assert( connInfoServer.m_identityRemote == identClient );
+		assert( connInfoClient.m_identityRemote == identServer );
+	}
 
 	// Set the send rate to a fixed value
 	const int k_nSendRate = 256*1024;
@@ -884,8 +958,8 @@ void Test_lane_quick_priority_and_background()
 			// but otherwise leave the rest of the body unitialized
 			*(SteamNetworkingMicroseconds *)pMsg->m_pData = usecNow;
 
-			int64 nMsgNum;
-			SteamNetworkingSockets()->SendMessages( 1, &pMsg, &nMsgNum );
+			int64 nMsgNum = 0;
+			SteamNetworkingSockets()->SendMessages( 1, &pMsg, &nMsgNum, true );
 			++nMsgSent[k_LaneBackground];
 			assert( nMsgNum == nMsgSent[k_LaneBackground] );
 		}
@@ -902,8 +976,8 @@ void Test_lane_quick_priority_and_background()
 			// but otherwise leave the rest of the body unitialized
 			*(SteamNetworkingMicroseconds *)pMsg->m_pData = usecNow;
 
-			int64 nMsgNum;
-			SteamNetworkingSockets()->SendMessages( 1, &pMsg, &nMsgNum );
+			int64 nMsgNum = 0;
+			SteamNetworkingSockets()->SendMessages( 1, &pMsg, &nMsgNum, true );
 			++nMsgSent[k_LaneUrgent];
 			assert( nMsgNum == nMsgSent[k_LaneUrgent] );
 
@@ -928,8 +1002,8 @@ void Test_lane_quick_priority_and_background()
 				// but otherwise leave the rest of the body unitialized
 				*(SteamNetworkingMicroseconds *)pMsg->m_pData = usecNow;
 
-				int64 nMsgNum;
-				SteamNetworkingSockets()->SendMessages( 1, &pMsg, &nMsgNum );
+				int64 nMsgNum = 0;
+				SteamNetworkingSockets()->SendMessages( 1, &pMsg, &nMsgNum, true );
 				++nMsgSent[k_LaneGameplay];
 				assert( nMsgNum == nMsgSent[k_LaneGameplay] );
 			}
@@ -943,9 +1017,9 @@ void Test_lane_quick_priority_and_background()
 				// Occasionally send reliable
 				pMsg->m_nFlags = std::uniform_int_distribution<>( 0, 100 )( g_rand ) < 30 ? k_nSteamNetworkingSend_ReliableNoNagle : k_nSteamNetworkingSend_UnreliableNoNagle;
 
-				int64 nMsgNum;
-				SteamNetworkingSockets()->SendMessages( 1, &pMsg, &nMsgNum );
-				assert( nMsgNum >= 0 );
+				int64 nMsgNum = 0;
+				SteamNetworkingSockets()->SendMessages( 1, &pMsg, &nMsgNum, true );
+				assert( nMsgNum > 0 );
 			}
 
 			// Schedule the next send at 30hz
@@ -1010,6 +1084,89 @@ void Test_lane_quick_priority_and_background()
 	//assert( flRMSPingMS[k_LaneUrgent] < flRMSPingMS[k_LaneGameplay] ); // We are comparing pings of always reliable msgs to pings that might sometimes be unreliable, so not totally a fair comparison
 	//assert( flRMSPingMS[k_LaneGameplay] < k_nFakeLag*1.2 + 10 );
 
+}
+
+void Test_pipe()
+{
+	TEST_Printf( "***************************************************\n" );
+	TEST_Printf( "Pipe (socket pair, no network loopback)\n" );
+	TEST_Printf( "***************************************************\n" );
+
+	// CreateSocketPair with bUseNetworkLoopback=false: pure internal buffer path,
+	// no encryption, no packet fragmentation, no network stack involvement.
+	HSteamNetConnection hAlice, hBob;
+	SteamNetworkingIdentity identAlice, identBob;
+	identAlice.SetGenericString( "alice" );
+	identBob.SetGenericString( "bob" );
+	// NOTE: each pPeerIdentity is the remote identity seen by the *corresponding* connection.
+	assert( SteamNetworkingSockets()->CreateSocketPair( &hAlice, &hBob, false, &identBob, &identAlice ) );
+
+	// Verify each end observes the correct remote identity.
+	{
+		SteamNetConnectionInfo_t infoAlice, infoBob;
+		assert( SteamNetworkingSockets()->GetConnectionInfo( hAlice, &infoAlice ) );
+		assert( SteamNetworkingSockets()->GetConnectionInfo( hBob, &infoBob ) );
+		assert( infoAlice.m_identityRemote == identBob );
+		assert( infoBob.m_identityRemote == identAlice );
+	}
+
+	// Wire up to the global peer state used by TestNetworkConditions / PumpCallbacksAndMakeSureStillConnected.
+	g_peerClient.Reset();
+	g_peerServer.Reset();
+	g_peerClient.m_hSteamNetConnection = hAlice;
+	g_peerClient.m_bIsConnected = true;
+	g_peerClient.SetConnectionConfig();
+	g_peerServer.m_hSteamNetConnection = hBob;
+	g_peerServer.m_bIsConnected = true;
+	g_peerServer.SetConnectionConfig();
+
+	// Cursory connection test. Fake loss/lag config has no effect on a pipe
+	// (no network path), but the send/receive loop still exercises the connection.
+	TestNetworkConditions( 10*1000*1000, 0, 0, 0, 0, false, ETestConnectionMode::Cursory );
+
+	// Zero-copy: for a pipe connection the received message must point at the
+	// exact same data buffer that was handed to SendMessages -- no copy through
+	// any network or encryption layer.
+	{
+		SteamNetworkingMessage_t *pSendMsg = SteamNetworkingUtils()->AllocateMessage( 256 );
+		pSendMsg->m_conn = hAlice;
+		pSendMsg->m_nFlags = k_nSteamNetworkingSend_Reliable;
+		void *pSendData = pSendMsg->m_pData;
+
+		int64 nMsgNum = 0;
+		SteamNetworkingSockets()->SendMessages( 1, &pSendMsg, &nMsgNum, true );
+		assert( nMsgNum > 0 );
+
+		SteamNetworkingMessage_t *pRecvMsg = nullptr;
+		int nRecv = SteamNetworkingSockets()->ReceiveMessagesOnConnection( hBob, &pRecvMsg, 1 );
+		assert( nRecv == 1 );
+		assert( pRecvMsg->m_pData == pSendData ); // zero-copy: must be the same pointer
+		pRecvMsg->Release();
+	}
+
+	// Oversized messages: pipe connections have no network-imposed size limit, so
+	// messages larger than k_cbMaxSteamNetworkingSocketsMessageSizeSend must work.
+	{
+		const int k_cbHuge = k_cbMaxSteamNetworkingSocketsMessageSizeSend * 3;
+		SteamNetworkingMessage_t *pSendMsg = SteamNetworkingUtils()->AllocateMessage( k_cbHuge );
+		pSendMsg->m_conn = hAlice;
+		pSendMsg->m_nFlags = k_nSteamNetworkingSend_Reliable;
+
+		int64 nMsgNum = 0;
+		SteamNetworkingSockets()->SendMessages( 1, &pSendMsg, &nMsgNum, true );
+		assert( nMsgNum > 0 );
+
+		SteamNetworkingMessage_t *pRecvMsg = nullptr;
+		int nRecv = SteamNetworkingSockets()->ReceiveMessagesOnConnection( hBob, &pRecvMsg, 1 );
+		assert( nRecv == 1 );
+		assert( pRecvMsg->m_cbSize == k_cbHuge );
+		pRecvMsg->Release();
+	}
+
+	SteamNetworkingSockets()->CloseConnection( hAlice, 0, nullptr, false );
+	SteamNetworkingSockets()->CloseConnection( hBob, 0, nullptr, false );
+	g_peerClient.Reset();
+	g_peerServer.Reset();
 }
 
 void Test_netloopback_throughput()
@@ -1107,8 +1264,8 @@ void Test_netloopback_throughput()
 					pSendMsg->m_nFlags = k_nSteamNetworkingSend_Reliable;
 					// Don't bother initializing the body
 
-					int64 nMsgNumberOrResult;
-					SteamNetworkingSockets()->SendMessages( 1, &pSendMsg, &nMsgNumberOrResult );
+					int64 nMsgNumberOrResult = 0;
+					SteamNetworkingSockets()->SendMessages( 1, &pSendMsg, &nMsgNumberOrResult, true );
 					if ( nMsgNumberOrResult == -k_EResultLimitExceeded )
 					{
 						TEST_Printf( "SendMessage returned limit exceeded trying to queue %d + %d = %d\n", serverStatus.m_cbPendingReliable, cbSendMsg, serverStatus.m_cbPendingReliable + cbSendMsg );
@@ -1193,6 +1350,97 @@ void Test_netloopback_throughput()
 	SteamNetworkingSockets()->CloseConnection( hClient, 0, nullptr, false );
 }
 
+void Test_send_buffer_full()
+{
+	TEST_Printf( "***************************************************\n" );
+	TEST_Printf( "Test: SendMessages batch stop and retry on buffer full\n" );
+	TEST_Printf( "***************************************************\n" );
+
+	// Network loopback so we get real rate limiting
+	HSteamNetConnection hSender, hRecver;
+	assert( SteamNetworkingSockets()->CreateSocketPair( &hSender, &hRecver, true, nullptr, nullptr ) );
+	SteamNetworkingSockets()->SetConnectionName( hSender, "sender" );
+	SteamNetworkingSockets()->SetConnectionName( hRecver, "recver" );
+
+	// Low send rate so the buffer stays full long enough to observe
+	const int k_nSendRate = 64 * 1024;
+	SteamNetworkingUtils()->SetConnectionConfigValueInt32( hSender, k_ESteamNetworkingConfig_SendRateMin, k_nSendRate );
+	SteamNetworkingUtils()->SetConnectionConfigValueInt32( hSender, k_ESteamNetworkingConfig_SendRateMax, k_nSendRate );
+
+	// Buffer fits one 100K message but not two, so msg[1] overflows and msg[2] is never attempted
+	const int k_cbMsg = 100 * 1024;
+	const int k_nSendBuffer = 160 * 1024;
+	SteamNetworkingUtils()->SetConnectionConfigValueInt32( hSender, k_ESteamNetworkingConfig_SendBufferSize, k_nSendBuffer );
+
+	// Prepare three reliable messages
+	SteamNetworkingMessage_t *pMessages[3];
+	for ( int i = 0; i < 3; ++i )
+	{
+		pMessages[i] = SteamNetworkingUtils()->AllocateMessage( k_cbMsg );
+		pMessages[i]->m_conn = hSender;
+		pMessages[i]->m_nFlags = k_nSteamNetworkingSend_Reliable;
+	}
+
+	// Send all three at once. Pass bDeleteFailedMessages=false so the library
+	// leaves failed/not-attempted message pointers in place for retry.
+	int64 results[3] = {};
+	SteamNetworkingSockets()->SendMessages( 3, pMessages, results, /*bDeleteFailedMessages=*/false );
+
+	// First message fits in the 160K buffer: should succeed
+	assert( results[0] > 0 );
+	assert( pMessages[0] == nullptr ); // library took ownership
+
+	// Second message overflows the buffer: should fail
+	assert( results[1] == -k_EResultLimitExceeded );
+	assert( pMessages[1] != nullptr ); // we still own it; can retry
+
+	// Third message was never attempted because the second failed
+	assert( results[2] == 0 );
+	assert( pMessages[2] != nullptr ); // we still own it; can retry
+
+	TEST_Printf( "Initial send: msg[0]=#%lld succeeded, msg[1]=LimitExceeded, msg[2]=not attempted.\n", results[0] );
+
+	// Retry the two remaining messages one at a time.  The buffer only holds one
+	// 100K message, so we must wait for space before each retry.
+	SteamNetworkingMessage_t *pRetry[2] = { pMessages[1], pMessages[2] };
+	for ( int i = 0; i < 2; ++i )
+	{
+		TEST_Printf( "Waiting for buffer space (retry %d)...\n", i );
+		SteamNetworkingMicroseconds usecDeadline = SteamNetworkingUtils()->GetLocalTimestamp() + 10 * 1000000LL;
+		for (;;)
+		{
+			TEST_PumpCallbacks();
+
+			// Keep the receiver drained so the connection stays healthy
+			SteamNetworkingMessage_t *pRecvMsgs[16];
+			for (;;)
+			{
+				int nRecv = SteamNetworkingSockets()->ReceiveMessagesOnConnection( hRecver, pRecvMsgs, 16 );
+				if ( nRecv <= 0 ) break;
+				for ( int j = 0; j < nRecv; ++j )
+					pRecvMsgs[j]->Release();
+				if ( nRecv < 16 ) break;
+			}
+
+			SteamNetConnectionRealTimeStatus_t status;
+			assert( k_EResultOK == SteamNetworkingSockets()->GetConnectionRealTimeStatus( hSender, &status, 0, nullptr ) );
+			if ( status.m_cbPendingReliable + k_cbMsg < k_nSendBuffer )
+				break;
+
+			assert( SteamNetworkingUtils()->GetLocalTimestamp() < usecDeadline );
+		}
+
+		int64 retryResult = 0;
+		SteamNetworkingSockets()->SendMessages( 1, &pRetry[i], &retryResult, /*bDeleteFailedMessages=*/false );
+		assert( retryResult > 0 );
+		assert( pRetry[i] == nullptr );
+		TEST_Printf( "Retry %d succeeded: queued as msg #%lld.\n", i, retryResult );
+	}
+
+	SteamNetworkingSockets()->CloseConnection( hSender, 0, nullptr, false );
+	SteamNetworkingSockets()->CloseConnection( hRecver, 0, nullptr, false );
+}
+
 int main( int argc, const char **argv  )
 {
 	typedef void (*FnTest)(void);
@@ -1209,7 +1457,9 @@ int main( int argc, const char **argv  )
 		TEST(soak),
 		TEST(netloopback_throughput),
 		TEST(lane_quick_queueanddrain),
-		TEST(lane_quick_priority_and_background)
+		TEST(lane_quick_priority_and_background),
+		TEST(pipe),
+		TEST(send_buffer_full)
 	};
 
 	struct Suite_t {
@@ -1217,7 +1467,7 @@ int main( int argc, const char **argv  )
 		std::vector< Test_t > m_vecTests;
 	};
 	static const Suite_t test_suites[] = {
-		{ "suite-quick", { TEST(identity), TEST(quick), TEST(lane_quick_queueanddrain), TEST(netloopback_throughput), TEST(lane_quick_priority_and_background) } }
+		{ "suite-quick", { TEST(identity), TEST(quick), TEST(lane_quick_queueanddrain), TEST(lane_quick_priority_and_background), TEST(pipe), TEST(send_buffer_full) } }
 	};
 
 	if ( argc < 2 )
@@ -1296,7 +1546,7 @@ print_available_tests_and_exit:
 	}
 
 	// Shutdown library
-	TEST_Kill();	
+	TEST_Kill();
 	return 0;
 }
 
